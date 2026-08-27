@@ -5,3 +5,6 @@ run_log.txt
 last_error.txt
 debug_*.png
 error_*.png
+venv/
+.pw-browsers/
+downloads/

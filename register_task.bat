@@ -22,6 +22,11 @@ schtasks /Create ^
  /RL HIGHEST ^
  /F
 
+REM Fix the action: schtasks /Create mishandles paths with spaces and
+REM splits them (Command="D:\Hari", Arguments="JR. DATA\..."), causing
+REM 0x80070002. Re-set the full path + working directory via COM.
+powershell -NoProfile -Command "$d='%~dp0'.TrimEnd('\'); $bat=$d+'\run_task.bat'; $s=New-Object -ComObject Schedule.Service; $s.Connect(); $f=$s.GetFolder('\'); $t=$f.GetTask('%TASK_NAME%'); $def=$t.Definition; foreach($a in $def.Actions){$a.Path=$bat; $a.Arguments=''; $a.WorkingDirectory=$d}; $f.RegisterTaskDefinition('%TASK_NAME%',$def,4,'SYSTEM',$null,5)"
+
 if %ERRORLEVEL% EQU 0 (
     echo.
     echo Task "%TASK_NAME%" scheduled daily at 07:00 (SYSTEM account).
