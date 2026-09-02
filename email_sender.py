@@ -47,10 +47,22 @@ CC             = [n.strip() for n in (args.cc if args.cc is not None else os.get
 
 
 def latest_sales_file() -> Path:
-    matches = sorted(glob.glob(str(DOWNLOAD_DIR / "Trinity Sales Register -*.xlsx")))
+    matches = list(glob.glob(str(DOWNLOAD_DIR / "Trinity Sales Register -*.xlsx")))
     if not matches:
         raise FileNotFoundError(f"No 'Trinity Sales Register -*.xlsx' found in {DOWNLOAD_DIR}")
-    return Path(matches[-1])
+
+    # Pick the TRUE newest by parsing the DD.MM.YYYY date from the
+    # filename. String-sorting the names is wrong across month
+    # boundaries (e.g. "02.09.2026" < "29.08.2026" alphabetically).
+    def _key(p: str):
+        base = Path(p).stem  # 'Trinity Sales Register -29.08.2026'
+        part = base.split(" -")[-1] if " -" in base else ""
+        try:
+            return datetime.strptime(part, "%d.%m.%Y")
+        except ValueError:
+            return datetime.min
+
+    return Path(max(matches, key=_key))
 
 
 def _attach_file(msg: MIMEMultipart, path: Path):
