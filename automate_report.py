@@ -59,12 +59,9 @@ REPORT_SNUM    = 26   # S.No in the duration Excel
 TODAY          = date.today()
 SHEET_NAME     = TODAY.strftime("%d-%m-%Y")   # e.g. 24-06-2026
 
-# Previous (last completed) month date range.
-# e.g. a run in September exports 01-08-2026 → 31-08-2026, matching the
-# user's monthly "AUG SALES.xlsx" style workbook.
-_LM_YEAR, _LM_MONTH = (TODAY.year - 1, 12) if TODAY.month == 1 else (TODAY.year, TODAY.month - 1)
-MONTH_FROM     = date(_LM_YEAR, _LM_MONTH, 1)
-MONTH_TO       = date(_LM_YEAR, _LM_MONTH, monthrange(_LM_YEAR, _LM_MONTH)[1])
+# Current month date range
+MONTH_FROM     = date(TODAY.year, TODAY.month, 1)
+MONTH_TO       = date(TODAY.year, TODAY.month, monthrange(TODAY.year, TODAY.month)[1])
 DATE_FMT       = "%d-%m-%Y"   # RamcoHub date fields use DD-MM-YYYY
 
 # Set to True to narrow to a 2-day window for fast iteration while

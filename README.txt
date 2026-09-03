@@ -43,7 +43,8 @@ Open `config.env` and confirm:
   SMTP_PORT        = 587                  (STARTTLS)
   SMTP_USER        = pepsit@pepsindia.com
   SMTP_PASSWORD    = Peps@151
-  EMAIL_RECIPIENTS = trinity@pepsindia.com,hariit@pepsindia.com   (To)
+  EMAIL_RECIPIENTS = trinity@pepsindia.com,hariit@pepsindia.com,
+                     trinitysupermarketshubil@gmail.com           (To)
   EMAIL_CC         = sales@pepsindia.com,janaki@pepsindia.com,
                      itsupport@pepsindia.com                      (Cc)
 
