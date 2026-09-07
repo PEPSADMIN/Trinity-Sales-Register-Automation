@@ -31,6 +31,8 @@ parser.add_argument("--to", default=None, help="Override TO recipients (comma-se
 parser.add_argument("--cc", default=None, help="Override CC recipients (comma-separated)")
 parser.add_argument("--error", default=None, help="Send an error-alert email (no attachment) with this message")
 parser.add_argument("--error-file", default=None, help="Read the issue detail from this file and append it to the error message")
+parser.add_argument("--note", default=None, help="Highlighted banner line to prepend to the email body (e.g. a correction notice)")
+parser.add_argument("--allow-stale", action="store_true", help="Skip the today's-date safety check on the attached file (manual resend of an older report)")
 args = parser.parse_args()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [EMAIL] %(levelname)s %(message)s")
@@ -46,6 +48,17 @@ RECIPIENTS     = [n.strip() for n in (args.to if args.to is not None else os.get
 CC             = [n.strip() for n in (args.cc if args.cc is not None else os.getenv("EMAIL_CC", "")).split(",") if n.strip()]
 
 
+def _file_date(p) -> date:
+    """Parse the DD.MM.YYYY date out of a 'Trinity Sales Register -DD.MM.YYYY.xlsx'
+    filename. Returns date.min if the name doesn't match the expected pattern."""
+    base = Path(p).stem  # 'Trinity Sales Register -29.08.2026'
+    part = base.split(" -")[-1] if " -" in base else ""
+    try:
+        return datetime.strptime(part, "%d.%m.%Y").date()
+    except ValueError:
+        return date.min
+
+
 def latest_sales_file() -> Path:
     matches = list(glob.glob(str(DOWNLOAD_DIR / "Trinity Sales Register -*.xlsx")))
     if not matches:
@@ -53,16 +66,9 @@ def latest_sales_file() -> Path:
 
     # Pick the TRUE newest by parsing the DD.MM.YYYY date from the
     # filename. String-sorting the names is wrong across month
-    # boundaries (e.g. "02.09.2026" < "29.08.2026" alphabetically).
-    def _key(p: str):
-        base = Path(p).stem  # 'Trinity Sales Register -29.08.2026'
-        part = base.split(" -")[-1] if " -" in base else ""
-        try:
-            return datetime.strptime(part, "%d.%m.%Y")
-        except ValueError:
-            return datetime.min
-
-    return Path(max(matches, key=_key))
+    # boundaries (e.g. "02.09.2026" < "29.08.2026" alphabetically) — this
+    # exact bug shipped a stale Aug-29 file on 06-Sep and 07-Sep 2026.
+    return Path(max(matches, key=_file_date))
 
 
 def _attach_file(msg: MIMEMultipart, path: Path):
@@ -85,21 +91,60 @@ def send_latest():
 
     file_path = latest_sales_file()
     today = date.today()
+
+    # Safety net: never silently email a report that isn't dated today.
+    # This is what protects against a repeat of the stale-file bug (a
+    # picker regression, a leftover old export, a failed download that
+    # left yesterday's file as the newest match, etc.) — instead of
+    # blasting the wrong data to the whole distribution list, refuse and
+    # alert hariit only. Override with --allow-stale for a deliberate
+    # manual resend of an older report.
+    picked_date = _file_date(file_path)
+    if not args.allow_stale and picked_date != today:
+        raise RuntimeError(
+            f"Refusing to send: latest matching file is dated "
+            f"{picked_date.strftime('%d-%b-%Y') if picked_date != date.min else 'unknown'} "
+            f"({file_path.name}), but today is {today.strftime('%d-%b-%Y')}. "
+            f"Re-run with --allow-stale to send it anyway."
+        )
+
     subject = f"Trinity Sales Register - {today.strftime('%d.%m.%Y')}"
-    body = (
+    plain_lines = []
+    html_lines = []
+    if args.note:
+        plain_lines.append(f"*** {args.note} ***\n")
+        html_lines.append(
+            f'<p style="color:#c00000;font-weight:bold;font-size:14px;">{args.note}</p>'
+        )
+    plain_lines.append(
         f"Please find attached the Trinity Sales Register report "
         f"for {today.strftime('%d-%b-%Y')}.\n\n"
         f"File: {file_path.name}\n\n"
         f"This is an automated email — please do not reply."
     )
+    body = "\n".join(plain_lines)
 
-    msg = MIMEMultipart()
+    msg = MIMEMultipart("mixed")
     msg["Subject"] = subject
     msg["From"] = f"{FROM_NAME} <{SMTP_USER}>"
     msg["To"] = ", ".join(RECIPIENTS)
     if CC:
         msg["Cc"] = ", ".join(CC)
-    msg.attach(MIMEText(body, "plain", "utf-8"))
+
+    if args.note:
+        html_lines.append(
+            f"<p>Please find attached the Trinity Sales Register report "
+            f"for {today.strftime('%d-%b-%Y')}.</p>"
+            f"<p>File: {file_path.name}</p>"
+            f"<p>This is an automated email — please do not reply.</p>"
+        )
+        alt = MIMEMultipart("alternative")
+        alt.attach(MIMEText(body, "plain", "utf-8"))
+        alt.attach(MIMEText("".join(html_lines), "html", "utf-8"))
+        msg.attach(alt)
+    else:
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
     _attach_file(msg, file_path)
 
     all_addrs = RECIPIENTS + CC
@@ -159,4 +204,15 @@ if __name__ == "__main__":
                 message = f"{message}\n\n(Also, could not read error detail file: {_e})"
         send_error(message, err_to)
     else:
-        send_latest()
+        try:
+            send_latest()
+        except Exception as e:
+            log.error(f"send_latest failed: {e}")
+            err_to = [n.strip() for n in
+                      os.getenv("ERROR_EMAIL_RECIPIENTS", "hariit@pepsindia.com").split(",")
+                      if n.strip()]
+            try:
+                send_error(f"The Trinity Sales Register report EMAIL failed to send.\n\n{e}", err_to)
+            except Exception as alert_err:
+                log.error(f"Also failed to send the error-alert email: {alert_err}")
+            raise
