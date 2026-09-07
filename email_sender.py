@@ -15,7 +15,7 @@ import logging
 import smtplib
 import argparse
 from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from dotenv import load_dotenv
 from email.mime.multipart import MIMEMultipart
@@ -33,7 +33,9 @@ parser.add_argument("--error", default=None, help="Send an error-alert email (no
 parser.add_argument("--error-file", default=None, help="Read the issue detail from this file and append it to the error message")
 parser.add_argument("--note", default=None, help="Highlighted banner line to prepend to the email body (e.g. a correction notice)")
 parser.add_argument("--allow-stale", action="store_true", help="Skip the today's-date safety check on the attached file (manual resend of an older report)")
-args = parser.parse_args()
+# parse_known_args (not parse_args) so this module stays importable under
+# pytest without choking on pytest's own command-line arguments.
+args, _unknown_args = parser.parse_known_args()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [EMAIL] %(levelname)s %(message)s")
 log = logging.getLogger("trinity_email")
@@ -69,6 +71,27 @@ def latest_sales_file() -> Path:
     # boundaries (e.g. "02.09.2026" < "29.08.2026" alphabetically) — this
     # exact bug shipped a stale Aug-29 file on 06-Sep and 07-Sep 2026.
     return Path(max(matches, key=_file_date))
+
+
+def _archive_old_files(keep_days: int = 7):
+    """Move Sales Register exports older than `keep_days` into an
+    'archive' subfolder. Keeps DOWNLOAD_DIR small so a future picker
+    regression has far fewer stale files it could accidentally match."""
+    cutoff = date.today() - timedelta(days=keep_days)
+    old = [
+        Path(p) for p in glob.glob(str(DOWNLOAD_DIR / "Trinity Sales Register -*.xlsx"))
+        if _file_date(p) != date.min and _file_date(p) < cutoff
+    ]
+    if not old:
+        return
+    archive_dir = DOWNLOAD_DIR / "archive"
+    archive_dir.mkdir(exist_ok=True)
+    for p in old:
+        try:
+            p.rename(archive_dir / p.name)
+        except OSError as e:
+            log.warning(f"Could not archive {p.name}: {e}")
+    log.info(f"Archived {len(old)} report(s) older than {keep_days} days to {archive_dir}")
 
 
 def _attach_file(msg: MIMEMultipart, path: Path):
@@ -155,6 +178,7 @@ def send_latest():
         srv.sendmail(SMTP_USER, all_addrs, msg.as_string())
 
     log.info(f"Email sent with attachment {file_path.name} → To: {RECIPIENTS}  CC: {CC}")
+    _archive_old_files()
 
 
 def send_error(message: str, recipients: list):

@@ -14,6 +14,33 @@ REM ============================================================
 set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%"
 
+set "LOGFILE=%SCRIPT_DIR%run_log.txt"
+
+REM Sync the scripts to the latest committed/pushed code before running.
+REM This is what actually closes off the Sep-06/07-2026 stale-file
+REM incident: that bug shipped because a local, uncommitted edit on disk
+REM had silently reverted an already-fixed function. Resetting to
+REM origin/main here means the 7 AM run always executes the real,
+REM reviewed version — a forgotten local edit can no longer diverge from
+REM it. config.env/downloads/venv are all gitignored, so this doesn't
+REM touch secrets or data. Best-effort: if offline, just run with
+REM whatever is already on disk rather than failing the whole job.
+set "GIT=C:\Program Files\Git\cmd\git.exe"
+if not exist "%GIT%" set "GIT=git"
+
+echo [%DATE% %TIME%] Syncing to origin/main... >> "%LOGFILE%"
+"%GIT%" -C "%SCRIPT_DIR%" fetch origin main --quiet >> "%LOGFILE%" 2>&1
+if !ERRORLEVEL! EQU 0 (
+    "%GIT%" -C "%SCRIPT_DIR%" reset --hard origin/main --quiet >> "%LOGFILE%" 2>&1
+    if !ERRORLEVEL! EQU 0 (
+        echo [%DATE% %TIME%] Synced to origin/main. >> "%LOGFILE%"
+    ) else (
+        echo [%DATE% %TIME%] WARNING: git reset failed; running with existing local files. >> "%LOGFILE%"
+    )
+) else (
+    echo [%DATE% %TIME%] WARNING: git fetch failed (offline?); running with existing local files. >> "%LOGFILE%"
+)
+
 REM Use the self-contained venv (works under SYSTEM; avoids per-user
 REM site-packages / Playwright browser-cache visibility issues).
 set "PYTHON=%SCRIPT_DIR%venv\Scripts\python.exe"
@@ -22,7 +49,6 @@ if not exist "%PYTHON%" set "PYTHON=python"
 REM Playwright browsers live in the project folder (SYSTEM-readable)
 set "PLAYWRIGHT_BROWSERS_PATH=%SCRIPT_DIR%.pw-browsers"
 
-set "LOGFILE=%SCRIPT_DIR%run_log.txt"
 set "MAX_ATTEMPTS=6"
 
 echo [%DATE% %TIME%] Starting Trinity Sales Register (download + email)... >> "%LOGFILE%"
