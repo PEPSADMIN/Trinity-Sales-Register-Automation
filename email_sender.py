@@ -23,7 +23,8 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 
-load_dotenv(dotenv_path=Path(__file__).parent / "config.env")
+SCRIPT_DIR = Path(__file__).parent
+load_dotenv(dotenv_path=SCRIPT_DIR / "config.env")
 
 # CLI overrides (used for safe test runs, e.g. --to hariit@pepsindia.com --cc "")
 parser = argparse.ArgumentParser()
@@ -41,6 +42,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [EMAIL] %(levelname)
 log = logging.getLogger("trinity_email")
 
 DOWNLOAD_DIR   = Path(os.getenv("DOWNLOAD_DIR", r"C:\Users\ADMIN\Downloads"))
+LAST_SENT_FILE = SCRIPT_DIR / ".last_sent"
 SMTP_SERVER    = os.getenv("SMTP_SERVER", "zimsmtp.logix.in")
 SMTP_PORT      = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER      = os.getenv("SMTP_USER", "")
@@ -178,6 +180,17 @@ def send_latest():
         srv.sendmail(SMTP_USER, all_addrs, msg.as_string())
 
     log.info(f"Email sent with attachment {file_path.name} → To: {RECIPIENTS}  CC: {CC}")
+
+    # Persistent, redirection-independent success marker — the watchdog
+    # checks this file rather than grepping run_log.txt, since an
+    # interactive/manual run (like this one, invoked straight from a
+    # shell without >> run_log.txt) would otherwise leave no record and
+    # the watchdog would wrongly believe today's report never went out.
+    try:
+        LAST_SENT_FILE.write_text(today.isoformat(), encoding="utf-8")
+    except OSError as e:
+        log.warning(f"Could not write {LAST_SENT_FILE}: {e}")
+
     _archive_old_files()
 
 
