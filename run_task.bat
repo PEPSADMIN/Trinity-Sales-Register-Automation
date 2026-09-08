@@ -35,18 +35,27 @@ REM swallowed the rest of the line into one argument and crashed this
 REM script outright on 08-Sep-2026 (no download, no email sent at all).
 REM We already "cd /d" into SCRIPT_DIR above, so plain git commands
 REM already operate on the right repo — no -C needed.
+REM Plain if/goto, not nested if/else(...) blocks — this file already
+REM uses goto for the download-retry loop, and nested parenthesized
+REM if/else blocks are fragile in cmd.exe (easy to trip a silent
+REM "... was unexpected at this time" parse failure once a file has
+REM several such blocks). goto keeps each step a single flat line.
 echo [%DATE% %TIME%] Syncing to origin/main... >> "%LOGFILE%"
 "%GIT%" fetch origin main --quiet >> "%LOGFILE%" 2>&1
-if !ERRORLEVEL! EQU 0 (
-    "%GIT%" reset --hard origin/main --quiet >> "%LOGFILE%" 2>&1
-    if !ERRORLEVEL! EQU 0 (
-        echo [%DATE% %TIME%] Synced to origin/main. >> "%LOGFILE%"
-    ) else (
-        echo [%DATE% %TIME%] WARNING: git reset failed; running with existing local files. >> "%LOGFILE%"
-    )
-) else (
-    echo [%DATE% %TIME%] WARNING: git fetch failed (offline?); running with existing local files. >> "%LOGFILE%"
-)
+if not !ERRORLEVEL! EQU 0 goto :sync_fetch_failed
+"%GIT%" reset --hard origin/main --quiet >> "%LOGFILE%" 2>&1
+if not !ERRORLEVEL! EQU 0 goto :sync_reset_failed
+echo [%DATE% %TIME%] Synced to origin/main. >> "%LOGFILE%"
+goto :sync_done
+
+:sync_fetch_failed
+echo [%DATE% %TIME%] WARNING: git fetch failed (offline?); running with existing local files. >> "%LOGFILE%"
+goto :sync_done
+
+:sync_reset_failed
+echo [%DATE% %TIME%] WARNING: git reset failed; running with existing local files. >> "%LOGFILE%"
+
+:sync_done
 
 REM Use the self-contained venv (works under SYSTEM; avoids per-user
 REM site-packages / Playwright browser-cache visibility issues).
