@@ -90,12 +90,39 @@ To remove later:
 
 ---
 
+### STEP 5 — Schedule the watchdog at 7:40 AM (recommended)
+
+Right-click `register_watchdog_task.bat` and choose **Run as
+administrator**. This creates a daily 07:40 task named **"Trinity
+Sales Register Watchdog"** under SYSTEM — ~40 minutes after the main
+job, so it has time to finish all 6 download retries first.
+
+The watchdog is an *independent* check: it verifies today's report was
+actually downloaded and emailed, regardless of whether `run_task.bat`
+itself ran, crashed, or was never triggered at all. If it wasn't, it
+alerts `hariit` and then tries to download + email the report itself.
+If that recovery also fails, it sends a second alert. See `watchdog.py`.
+
+Verify with:
+
+    schtasks /Query /TN "Trinity Sales Register Watchdog" /V
+
+To remove later:
+
+    schtasks /Delete /TN "Trinity Sales Register Watchdog" /F
+
+---
+
 ### WHAT IT DOES
 
-1. `run_task.bat` runs `automate_report.py` (a project-local
+1. `run_task.bat` first syncs this folder to `origin/main` (`git fetch`
+   + `git reset --hard`) so the scheduled run always executes the
+   real, committed code — never a stale or accidentally-edited local
+   copy. `config.env`/`downloads/`/`venv/` are gitignored and untouched.
+2. It then runs `automate_report.py` (a project-local
    `venv\Scripts\python.exe`), retrying the download up to **6 times**
    (the ERP login is flaky), writing progress to `run_log.txt`.
-2. `automate_report.py` logs into Ramco ERP with the configured
+3. `automate_report.py` logs into Ramco ERP with the configured
    credentials, opens the **Sales Register Mattresses** report, exports
    the current month to an `.xlsx` in `DOWNLOAD_DIR`, renames it to
    `Trinity Sales Register -DD.MM.YYYY.xlsx`, and fixes the ERP's broken
@@ -103,11 +130,18 @@ To remove later:
    - Kept the fix that replaces `networkidle` waits with
      `domcontentloaded` (the earlier hang), and dismisses the
      "already logged in" session dialog.
-3. `email_sender.py` attaches that file (unchanged) and sends it via SMTP
-   to `trinity` and `hariit` (To) with `sales`, `janaki`, `itsupport` as Cc.
-4. If **all** download attempts fail (e.g. ERP slow/unavailable), an
-   **error alert is emailed only to `hariit@pepsindia.com`** with a
-   sentence stating the actual failure reason (from `last_error.txt`).
+4. `email_sender.py` refuses to send if the newest matching file isn't
+   dated today (protects against ever re-sending a stale report), then
+   attaches that file (unchanged) and sends it via SMTP to `trinity`
+   and `hariit` (To) with `sales`, `janaki`, `itsupport` as Cc. It then
+   archives exports older than 7 days into `downloads\archive\`, and
+   records the send in `.last_sent` (used by the watchdog).
+5. If **all** download attempts fail (e.g. ERP slow/unavailable), or if
+   `email_sender.py` itself fails, an **error alert is emailed only to
+   `hariit@pepsindia.com`** with a sentence stating the actual failure
+   reason (from `last_error.txt`).
+6. The watchdog (Step 5) independently double-checks the whole thing
+   ~40 minutes later and self-heals if it didn't happen.
 
 `python` is invoked with `-u` so the logs flush in real time.
 
