@@ -28,10 +28,17 @@ REM whatever is already on disk rather than failing the whole job.
 set "GIT=C:\Program Files\Git\cmd\git.exe"
 if not exist "%GIT%" set "GIT=git"
 
+REM NOTE: no "-C %SCRIPT_DIR%" here — SCRIPT_DIR ends in a trailing
+REM backslash (from %~dp0), and "\"" right before the closing quote is
+REM parsed by cmd.exe as an escaped quote, not a closing one. That
+REM swallowed the rest of the line into one argument and crashed this
+REM script outright on 08-Sep-2026 (no download, no email sent at all).
+REM We already "cd /d" into SCRIPT_DIR above, so plain git commands
+REM already operate on the right repo — no -C needed.
 echo [%DATE% %TIME%] Syncing to origin/main... >> "%LOGFILE%"
-"%GIT%" -C "%SCRIPT_DIR%" fetch origin main --quiet >> "%LOGFILE%" 2>&1
+"%GIT%" fetch origin main --quiet >> "%LOGFILE%" 2>&1
 if !ERRORLEVEL! EQU 0 (
-    "%GIT%" -C "%SCRIPT_DIR%" reset --hard origin/main --quiet >> "%LOGFILE%" 2>&1
+    "%GIT%" reset --hard origin/main --quiet >> "%LOGFILE%" 2>&1
     if !ERRORLEVEL! EQU 0 (
         echo [%DATE% %TIME%] Synced to origin/main. >> "%LOGFILE%"
     ) else (
